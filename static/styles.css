@@ -245,6 +245,42 @@ input:focus, select:focus {
 .review-save { padding: 0.3rem 0.7rem; font-size: 0.85rem; }
 .review-error { color: var(--err); font-size: 0.82rem; font-weight: 600; }
 
+/* ---------- 比赛名次与罚秒 ---------- */
+.ranking-table { width: 100%; border-collapse: collapse; margin-bottom: 0.4rem; }
+.ranking-table th, .ranking-table td {
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  font-size: 0.9rem;
+}
+.ranking-table th {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+.ranking-table tbody tr + tr td { border-top: 1px solid #eef1f6; }
+
+.penalty-editor {
+  border-top: 1px dashed var(--line);
+  padding-top: 0.5rem;
+  margin-top: 0.5rem;
+}
+.penalty-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+.penalty-label { font-size: 0.82rem; font-weight: 700; color: var(--muted); }
+.penalty-current { font-size: 0.82rem; white-space: pre-wrap; }
+.penalty-controls { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.penalty-seconds { width: 6rem; }
+.penalty-unit { color: var(--muted); font-size: 0.85rem; }
+.penalty-reason { flex: 1; min-width: 14rem; font-size: 0.85rem; }
+.penalty-save { padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+.penalty-error { color: var(--err); font-size: 0.82rem; font-weight: 600; }
+
 .subsection { margin-top: 0.7rem; }
 .subsection h4 { margin: 0 0 0.4rem; font-size: 0.9rem; color: var(--muted); }
 .chip-mini {
