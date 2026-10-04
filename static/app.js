@@ -13,6 +13,7 @@ const form = document.getElementById("judge-form");
 const errorBox = document.getElementById("error-box");
 const pendingHint = document.getElementById("pending-hint");
 const resultsBox = document.getElementById("results");
+const rankingBox = document.getElementById("ranking-box");
 
 /* ---------- 行管理 ---------- */
 
@@ -105,6 +106,9 @@ const DEBOUNCE_MS = 350; // 合并连续编辑为一次重算
 function clearOutcome() {
   // 每次修改立即清掉旧结果与旧错误。
   resultsBox.innerHTML = "";
+  rankingBox.innerHTML = "";
+  rankingBox.hidden = true;
+  lastResult = null; // 名次区已清空，保存罚秒不得基于旧结果重渲染
   errorBox.hidden = true;
   renderedLapKeys = []; // 结果区已清空，旧的趟键索引全部失效
 }
@@ -113,6 +117,8 @@ function onInputChanged() {
   inputVersion += 1;
   // 先按当前输入即时丢弃绑定已失效的复核：不必、也不能等到合法裁决返回。
   pruneReviewsByBindings();
+  // 编号改变或选手删除立即清除对应罚秒（改回不恢复），同样不等合法裁决。
+  prunePenaltiesByRunners();
   clearOutcome();
   pendingHint.hidden = false;
   if (debounceTimer) clearTimeout(debounceTimer);
@@ -166,19 +172,21 @@ async function runAdjudication() {
   } catch (err) {
     if (version !== inputVersion) return; // 过期的失败不得覆盖较新状态
     pendingHint.hidden = true;
-    resultsBox.innerHTML = "";
+    clearOutcome();
     showError(`无法连接裁决服务：${err.message}`);
     return;
   }
   if (version !== inputVersion) return; // 过期的成功同样丢弃
   pendingHint.hidden = true;
   if (!resp.ok || !data.ok) {
-    // 非法输入：清空结果区，只显示错误（不展示部分结果）。
-    resultsBox.innerHTML = "";
+    // 非法输入：清空结果区，只显示错误（不展示部分结果，也不展示名次）。
+    clearOutcome();
     showError(data.error || "裁决失败");
   } else {
     errorBox.hidden = true;
+    lastResult = data.result; // 保存罚秒后仅需据此即时更新名次，不必重算
     renderResults(data.result);
+    renderRanking(data.result);
   }
 }
 
@@ -189,6 +197,8 @@ form.addEventListener("submit", (e) => {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
+  // 重算期间隐藏名次（连同结果），新旧响应均不能让名次在此期间出现。
+  clearOutcome();
   pendingHint.hidden = false;
   runAdjudication();
 });
@@ -376,6 +386,185 @@ resultsBox.addEventListener("click", (e) => {
   box.querySelector(".review-current").innerHTML = reviewCurrentText({ status, note });
 });
 
+/* ---------- 罚秒与名次表（仅本次页面会话，不上传、不影响裁决/复核） ---------- */
+
+// 每名选手保存一个非负整数罚秒与一条原因，按选手编号索引；默认罚秒 0、空原因。
+// 仅保存在页面内存中：刷新、清空、填入示例即全部清除；编号改变或选手删除
+// 立即清除对应罚秒，之后改回也不恢复。罚秒只影响名次表，不改采纳记录、
+// 裁决用时与人工复核；保存后用最近一次合法结果立即更新名次，无需重新请求。
+const penalties = new Map(); // 编号(字符串) -> { seconds: number, reason: string }
+const MAX_PENALTY_REASON = 200;
+let lastResult = null; // 最近一次（适用于当前输入的）合法裁决结果
+
+function currentRunnerNumbers() {
+  return new Set(
+    [...runnerRows.querySelectorAll(".runner-number")]
+      .map((el) => el.value.trim())
+      .filter((v) => v !== "")
+      .map(Number)
+  );
+}
+
+// 即时剪枝：选手编号改变（旧编号不再出现在输入中）或选手删除的当下即删除
+// 对应罚秒；编号临时重复、改回原值都不会恢复。当前输入非法、防抖中、请求
+// 在途同样执行，过期响应之后也无法恢复（Map 中键已不存在）。
+function prunePenaltiesByRunners() {
+  const numbers = currentRunnerNumbers();
+  for (const key of [...penalties.keys()]) {
+    if (!numbers.has(Number(key))) penalties.delete(key);
+  }
+}
+
+function penaltyOf(runner) {
+  return penalties.get(String(runner)) || { seconds: 0, reason: "" };
+}
+
+// 标准竞赛排名（1、2、2、4）：有完整计次者按计次数降序、调整后用时升序；
+// 同值共享名次并跳号，并列行按编号升序展示。零次者不参与名次、统一排末尾。
+function buildRankingRows(result) {
+  const scored = result.runners
+    .filter((r) => r.lapCount > 0)
+    .map((r) => {
+      const p = penaltyOf(r.runner);
+      return {
+        runner: r.runner,
+        laps: r.lapCount,
+        totalTime: r.totalTime,
+        penalty: p.seconds,
+        adjusted: r.totalTime + p.seconds,
+        reason: p.reason,
+        ranked: true,
+      };
+    })
+    .sort((a, b) => {
+      if (b.laps !== a.laps) return b.laps - a.laps;
+      if (a.adjusted !== b.adjusted) return a.adjusted - b.adjusted;
+      return a.runner - b.runner; // 并列时按编号升序展示
+    });
+
+  scored.forEach((row, i) => {
+    if (i > 0) {
+      const prev = scored[i - 1];
+      if (row.laps === prev.laps && row.adjusted === prev.adjusted) {
+        row.rank = prev.rank; // 与前一名完全同值：共享名次
+      } else {
+        row.rank = i + 1; // 否则按位置给名次（自然形成 1、1、3 的跳号）
+      }
+    } else {
+      row.rank = 1;
+    }
+  });
+
+  const zeros = result.runners
+    .filter((r) => r.lapCount === 0)
+    .map((r) => {
+      const p = penaltyOf(r.runner);
+      return {
+        runner: r.runner,
+        laps: 0,
+        totalTime: r.totalTime,
+        penalty: p.seconds,
+        adjusted: r.totalTime + p.seconds,
+        reason: p.reason,
+        ranked: false,
+        rank: null,
+      };
+    })
+    .sort((a, b) => a.runner - b.runner); // 零次者末尾按编号升序，不给名次
+
+  return [...scored, ...zeros];
+}
+
+function rankingRowHtml(row) {
+  const rankCell = row.ranked
+    ? `<td class="rank-cell ${row.rank === 1 ? "rank-top" : ""}">${row.rank}</td>`
+    : `<td class="rank-cell rank-none">—</td>`;
+  const reasonText = row.penalty > 0 ? row.reason : "";
+  return `
+      <tr class="rank-row ${row.ranked ? "" : "rank-zero"}" data-runner="${row.runner}">
+        ${rankCell}
+        <td class="rank-number">${row.runner}</td>
+        <td>${row.laps}</td>
+        <td>${row.totalTime}</td>
+        <td class="penalty-cell">
+          <input type="number" min="0" step="1" class="penalty-seconds" value="${row.penalty}" aria-label="选手 ${row.runner} 的罚秒" />
+          <input type="text" class="penalty-reason" maxlength="${MAX_PENALTY_REASON}" value="${escapeAttr(
+    row.reason
+  )}" placeholder="罚秒大于 0 时必填原因（至多 ${MAX_PENALTY_REASON} 字）" aria-label="选手 ${row.runner} 的罚秒原因" />
+          <button type="button" class="btn secondary penalty-save">保存罚秒</button>
+          <span class="penalty-error" hidden></span>
+          <span class="penalty-saved">${
+            row.penalty > 0 ? `已保存：罚 ${row.penalty} 秒（${escapeHtml(reasonText)}）` : ""
+          }</span>
+        </td>
+        <td class="adjusted-cell">${row.adjusted}</td>
+      </tr>`;
+}
+
+function renderRanking(result) {
+  // 最新合法结果到达：结果中已不存在的编号（例如合法结果里的选手集变化）
+  // 同样清掉罚秒；正常流程下它们已在输入变更瞬间由 prunePenaltiesByRunners 删除。
+  for (const key of [...penalties.keys()]) {
+    if (!result.runners.some((r) => String(r.runner) === key)) penalties.delete(key);
+  }
+  const rows = buildRankingRows(result);
+  rankingBox.innerHTML = `
+  <section class="card ranking-card">
+    <h2>比赛名次</h2>
+    <p class="hint">有完整计次者按计次数降序、调整后用时（原总用时 + 罚秒）升序排名；同值并列共享名次并跳号，并列按编号升序展示。零次者排末尾、按编号升序且无名次。罚秒仅影响本表，不改变采纳记录、裁决用时与人工复核。</p>
+    <div class="table-wrap">
+      <table class="rank-table">
+        <thead>
+          <tr>
+            <th style="width:4.5rem">名次</th>
+            <th style="width:7rem">选手编号</th>
+            <th style="width:5.5rem">计次数</th>
+            <th style="width:7rem">原总用时（秒）</th>
+            <th>罚秒 / 原因（罚秒为非负整数，默认 0；罚秒 &gt; 0 时原因必填）</th>
+            <th style="width:8rem">调整后用时（秒）</th>
+          </tr>
+        </thead>
+        <tbody>${rows.map(rankingRowHtml).join("")}</tbody>
+      </table>
+    </div>
+  </section>`;
+  rankingBox.hidden = false;
+}
+
+// 保存罚秒：校验失败不写入，名次表与已保存罚秒/原因保持原样（输入框内
+// 未保存的文字保留，便于修改后重试）；成功后立即用最近合法结果重排名次，
+// 不向服务器重新裁决。
+rankingBox.addEventListener("click", (e) => {
+  if (!e.target.classList.contains("penalty-save")) return;
+  const tr = e.target.closest(".rank-row");
+  if (!tr || lastResult === null) return; // 重算/非法期间名次区不可见
+  const runner = tr.dataset.runner;
+  const secondsRaw = tr.querySelector(".penalty-seconds").value.trim();
+  const reason = tr.querySelector(".penalty-reason").value;
+  const errEl = tr.querySelector(".penalty-error");
+
+  const fail = (msg) => {
+    errEl.textContent = `⚠ ${msg}；已保留原罚秒与原因`;
+    errEl.hidden = false;
+  };
+  // 只接受十进制非负整数字面量；空串、小数、负数、0x、+5 等一律非法。
+  if (!/^\d+$/.test(secondsRaw)) {
+    fail("罚秒必须是非负整数");
+    return;
+  }
+  const seconds = Number(secondsRaw);
+  if (reason.length > MAX_PENALTY_REASON) {
+    fail(`原因至多 ${MAX_PENALTY_REASON} 字`);
+    return;
+  }
+  if (seconds > 0 && reason.trim() === "") {
+    fail("罚秒大于 0 时必须填写非空原因");
+    return;
+  }
+  penalties.set(runner, { seconds, reason });
+  renderRanking(lastResult); // 立即更新名次，无需重算
+});
+
 /* ---------- 结果渲染 ---------- */
 
 function gateChip(gate, id, time) {
@@ -510,6 +699,7 @@ const SAMPLE = {
 
 function loadSample() {
   reviews.clear(); // 载入示例同时清掉全部复核记录
+  penalties.clear(); // 载入示例同时清掉全部罚秒
   document.getElementById("smMin").value = SAMPLE.smMin;
   document.getElementById("smMax").value = SAMPLE.smMax;
   document.getElementById("mfMin").value = SAMPLE.mfMin;
@@ -537,6 +727,7 @@ function clearAll() {
   // 递增版本号并取消待发的重算：之后在途请求返回也不得恢复结果或错误。
   inputVersion += 1;
   reviews.clear(); // 清空同时清掉全部复核记录
+  penalties.clear(); // 清空同时清掉全部罚秒
   if (debounceTimer) {
     clearTimeout(debounceTimer);
     debounceTimer = null;

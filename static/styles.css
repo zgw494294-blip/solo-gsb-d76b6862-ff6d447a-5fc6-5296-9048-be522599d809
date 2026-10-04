@@ -153,6 +153,41 @@ input:focus, select:focus {
   padding: 1rem 1.2rem;
   margin-bottom: 1rem;
 }
+
+/* ---------- 比赛名次表 ---------- */
+.ranking-card { margin-bottom: 1rem; }
+.rank-table { width: 100%; border-collapse: collapse; margin-top: 0.7rem; }
+.rank-table th {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.rank-table td {
+  padding: 0.45rem 0.5rem;
+  border-top: 1px solid #eef1f6;
+  vertical-align: middle;
+}
+.rank-row.rank-zero { background: #f9fafb; color: var(--muted); }
+.rank-cell { font-weight: 700; font-size: 1rem; text-align: center; }
+.rank-cell.rank-top { color: var(--brand); }
+.rank-cell.rank-none { color: var(--muted); font-weight: 500; }
+.rank-number { font-weight: 600; }
+.adjusted-cell { font-weight: 700; }
+.penalty-cell { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.rank-table .penalty-seconds { width: 5.5rem; }
+.rank-table .penalty-reason { flex: 1 1 12rem; min-width: 10rem; }
+.penalty-save { padding: 0.3rem 0.7rem; font-size: 0.85rem; white-space: nowrap; }
+.penalty-error { color: var(--err); font-size: 0.8rem; font-weight: 600; }
+.penalty-saved {
+  width: 100%;
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
 .result-head {
   display: flex;
   align-items: baseline;
